@@ -100,6 +100,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "current_cycle_contribution"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "has_received_payout"
                     },
                     "val": {
@@ -219,6 +227,18 @@
                             "symbol": "Rotational"
                           }
                         ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "IsExecutingPayout"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
                       }
                     },
                     {

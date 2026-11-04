@@ -306,6 +306,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "IsExecutingPayout"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "LockUntilTarget"
                           }
                         ]

@@ -926,6 +926,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "current_cycle_contribution"
+                    },
+                    "val": {
+                      "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "has_received_payout"
                     },
                     "val": {
@@ -978,6 +986,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "current_cycle_contribution"
+                    },
+                    "val": {
+                      "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "has_received_payout"
                     },
                     "val": {
@@ -1028,6 +1044,14 @@
               "durability": "persistent",
               "val": {
                 "map": [
+                  {
+                    "key": {
+                      "symbol": "current_cycle_contribution"
+                    },
+                    "val": {
+                      "i128": "1000"
+                    }
+                  },
                   {
                     "key": {
                       "symbol": "has_received_payout"
@@ -1149,6 +1173,18 @@
                             "symbol": "Rotational"
                           }
                         ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "IsExecutingPayout"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
                       }
                     },
                     {
