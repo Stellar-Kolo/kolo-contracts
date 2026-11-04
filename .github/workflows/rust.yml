@@ -1,4 +1,4 @@
-name: Kolo Backend CI
+name: Kolo Contracts CI
 
 permissions:
   contents: read
@@ -86,6 +86,7 @@ jobs:
 
       - name: Install Stellar CLI
         run: |
+          sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
           cargo install stellar-cli --locked
           stellar --version
 
