@@ -68,6 +68,8 @@ jobs:
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
+    env:
+      STELLAR_SOURCE_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -101,9 +103,7 @@ jobs:
             -o target/wasm32v1-none/release/kolo_savings_group.optimized.wasm
 
       - name: Deploy contract to testnet
-        if: ${{ secrets.STELLAR_DEPLOYER_KEY != '' }}
-        env:
-          STELLAR_SOURCE_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_KEY }}
+        if: ${{ env.STELLAR_SOURCE_ACCOUNT != '' }}
         run: |
           stellar contract deploy \
             --wasm target/wasm32v1-none/release/kolo_savings_group.optimized.wasm \
@@ -111,5 +111,5 @@ jobs:
             --network testnet
 
       - name: Skip notice
-        if: ${{ secrets.STELLAR_DEPLOYER_KEY == '' }}
+        if: ${{ env.STELLAR_SOURCE_ACCOUNT == '' }}
         run: echo "STELLAR_DEPLOYER_KEY is not configured on this repository; skipping Testnet deployment." >> "$GITHUB_STEP_SUMMARY"
