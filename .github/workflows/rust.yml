@@ -85,10 +85,10 @@ jobs:
           workspaces: ${{ env.WORKING_DIR }}
 
       - name: Install Stellar CLI
-        run: |
-          sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
-          cargo install stellar-cli --locked
-          stellar --version
+        uses: stellar/stellar-cli@v30.0.1
+
+      - name: Verify Stellar CLI
+        run: stellar --version
 
       - name: Build and optimize WASM
         run: |
