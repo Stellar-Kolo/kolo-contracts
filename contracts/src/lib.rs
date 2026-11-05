@@ -400,13 +400,23 @@ impl KoloSavingsContract {
     /// Withdraw payout (Admin triggers payout to the next member in queue)
     /// Enforces strictly deterministic rotational payout (Ajo/Esusu) order.
     ///
+    /// `amount` lets the admin explicitly request a *partial* payout — e.g.
+    /// when not every member contributed this cycle and the group chooses to
+    /// proceed with a reduced pool rather than wait. `None` pays the full
+    /// computed pool (contribution_amount × the cycle's frozen member count),
+    /// which is also the ceiling for an explicit `Some(amount)`: the admin can
+    /// never authorize paying out more than the cycle's own pool, only less.
+    /// Either way the amount is part of what the admin signs for, via
+    /// `require_auth_for_args`, so a partial payout can't be substituted for
+    /// a full one (or vice versa) after the fact.
+    ///
     /// Follows the Checks-Effects-Interactions pattern: all validation happens
     /// first, then all state (NextPayoutIndex, the recipient's has_received_payout
     /// flag, and TTL extensions) is committed, and only then is the external
     /// token transfer performed. A reentrancy guard (`IsExecutingPayout`) is
     /// held for the duration of the call so that a malicious or upgraded token
     /// implementation cannot re-enter `payout()` or `contribute()` mid-transfer.
-    pub fn payout(env: Env, expected_recipient: Address) {
+    pub fn payout(env: Env, expected_recipient: Address, amount: Option<i128>) {
         // --- Checks ---
         assert_not_executing_payout(&env);
 
@@ -421,7 +431,7 @@ impl KoloSavingsContract {
         }
 
         let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth_for_args((expected_recipient.clone(),).into_val(&env));
+        admin.require_auth_for_args((expected_recipient.clone(), amount).into_val(&env));
         extend_instance_ttl(&env);
 
         let members: Vec<Address> = env.storage().instance().get(&DataKey::Members).unwrap();
@@ -450,9 +460,22 @@ impl KoloSavingsContract {
             .instance()
             .get(&DataKey::CycleMemberCount)
             .expect("No active cycle");
-        let pool_size = contribution_amount
+        let full_pool_size = contribution_amount
             .checked_mul(frozen_count)
             .expect("Math overflow in pool calculation");
+
+        let pool_size = match amount {
+            Some(requested) => {
+                if requested <= 0 {
+                    panic!("Payout amount must be positive");
+                }
+                if requested > full_pool_size {
+                    panic!("Payout amount exceeds the full computed pool");
+                }
+                requested
+            }
+            None => full_pool_size,
+        };
 
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let token_client = token::Client::new(&env, &token);
@@ -464,7 +487,7 @@ impl KoloSavingsContract {
 
         let contract_balance = token_client.balance(&env.current_contract_address());
         if pool_size > contract_balance {
-            panic!("Insufficient funds in contract for full payout");
+            panic!("Insufficient funds in contract for requested payout");
         }
 
         env.storage()

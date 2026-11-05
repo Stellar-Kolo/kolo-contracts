@@ -522,7 +522,7 @@ fn test_remove_member_after_payout_panics() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
 
-    client.payout(&member1);
+    client.payout(&member1, &None);
 
     client.remove_member(&member1);
 }
@@ -585,7 +585,7 @@ fn test_remove_member_adjusts_cycle_count() {
 
     client.contribute(&member2, &1000);
 
-    client.payout(&member1);
+    client.payout(&member1, &None);
 
     let contract_balance = token_client.balance(&contract_id);
     assert_eq!(contract_balance, 0);
@@ -682,7 +682,7 @@ fn test_deterministic_payout_order() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout(&member0);
+    client.payout(&member0, &None);
     assert!(client.has_received_payout(&member0));
     assert!(!client.has_received_payout(&member1));
     assert!(!client.has_received_payout(&member2));
@@ -699,7 +699,7 @@ fn test_deterministic_payout_order() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout(&member1);
+    client.payout(&member1, &None);
     assert!(client.has_received_payout(&member1));
     assert!(!client.has_received_payout(&member2));
     // 10000 - 1000 (round1) - 1000 (round2) + 3000 (payout) = 11000
@@ -711,7 +711,7 @@ fn test_deterministic_payout_order() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member2);
-    client.payout(&member2);
+    client.payout(&member2, &None);
     assert!(client.has_received_payout(&member2));
     // 10000 - 1000*3 (3 rounds) + 3000 (payout) = 10000
     assert_eq!(token_client.balance(&member2), 10000);
@@ -757,7 +757,7 @@ fn test_queue_enforced_payout_order() {
     client.contribute(&member2, &1000);
 
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout(&member0);
+    client.payout(&member0, &None);
     assert!(client.has_received_payout(&member0));
     assert!(!client.has_received_payout(&member2));
 
@@ -768,7 +768,7 @@ fn test_queue_enforced_payout_order() {
     client.contribute(&member2, &1000);
 
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout(&member1);
+    client.payout(&member1, &None);
     assert!(client.has_received_payout(&member1));
     assert!(!client.has_received_payout(&member2));
 
@@ -779,7 +779,7 @@ fn test_queue_enforced_payout_order() {
     client.contribute(&member2, &1000);
 
     assert_eq!(client.get_next_payout_recipient(), member2);
-    client.payout(&member2);
+    client.payout(&member2, &None);
     assert!(client.has_received_payout(&member2));
 }
 
@@ -823,7 +823,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout(&member0);
+    client.payout(&member0, &None);
     assert!(client.has_received_payout(&member0));
 
     // Round 2: payout to member1
@@ -832,7 +832,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout(&member1);
+    client.payout(&member1, &None);
     assert!(client.has_received_payout(&member1));
 
     // Round 3: payout to member2
@@ -841,7 +841,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member2);
-    client.payout(&member2);
+    client.payout(&member2, &None);
     assert!(client.has_received_payout(&member2));
 
     // --- Full reset: reset_rotation() resets NextPayoutIndex to 0 ---
@@ -858,7 +858,7 @@ fn test_cycle_resets_and_starts_again() {
     client.contribute(&member1, &1000);
     client.contribute(&member2, &1000);
     assert_eq!(client.get_next_payout_recipient(), member0);
-    client.payout(&member0);
+    client.payout(&member0, &None);
     assert!(client.has_received_payout(&member0));
 }
 
@@ -966,7 +966,7 @@ fn test_payout_pool_size_overflow_panics() {
             .set(&DataKey::CycleMemberCount, &2i128);
     });
 
-    client.payout(&member0);
+    client.payout(&member0, &None);
 }
 
 #[test]
@@ -1009,13 +1009,180 @@ fn test_payout_wrong_recipient_auth_fails() {
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
             contract: &contract_id,
             fn_name: "payout",
-            args: (member1.clone(),).into_val(&env),
+            args: (member1.clone(), None::<i128>).into_val(&env),
             sub_invokes: &[],
         },
     }]);
 
     // Calling it with member0 should fail because auth is for member1
-    client.payout(&member0);
+    client.payout(&member0, &None);
+}
+
+// ---------------------------------------------------------------------------
+// Partial payout tests (proceedWithPartialPool support)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_payout_partial_amount_succeeds_and_advances_rotation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    token_client.mint(&member0, &10000);
+    token_client.mint(&member1, &10000);
+
+    // Only member0 and member1 contribute this cycle — member2 defaults.
+    // The full pool would be 1000 * 3 = 3000, but the contract only holds
+    // 2000, so the admin proceeds with a partial payout of exactly that.
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+
+    assert_eq!(client.get_next_payout_recipient(), member0);
+    client.payout(&member0, &Some(2000i128));
+
+    assert!(client.has_received_payout(&member0));
+    // 10000 - 1000 (contrib) + 2000 (partial payout) = 11000
+    assert_eq!(token_client.balance(&member0), 11000);
+    assert_eq!(token_client.balance(&contract_id), 0);
+
+    // Rotation still advances normally after a partial payout.
+    assert_eq!(client.get_next_payout_recipient(), member1);
+}
+
+#[test]
+#[should_panic(expected = "Payout amount exceeds the full computed pool")]
+fn test_payout_partial_amount_above_full_pool_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+
+    token_client.mint(&member0, &10000);
+    token_client.mint(&member1, &10000);
+    client.contribute(&member0, &1000);
+    client.contribute(&member1, &1000);
+
+    // Full pool is 1000 * 2 = 2000 — asking for more than that is rejected
+    // even though the admin is authorizing it, so a compromised or buggy
+    // caller can never drain more than a cycle's own pool.
+    client.payout(&member0, &Some(2001i128));
+}
+
+#[test]
+#[should_panic(expected = "Payout amount must be positive")]
+fn test_payout_partial_amount_zero_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member0 = Address::generate(&env);
+    client.add_member(&member0);
+    token_client.mint(&member0, &10000);
+    client.contribute(&member0, &1000);
+
+    client.payout(&member0, &Some(0i128));
+}
+
+#[test]
+#[should_panic(expected = "Insufficient funds in contract for requested payout")]
+fn test_payout_partial_amount_above_balance_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, KoloSavingsContract);
+    let client = KoloSavingsContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token_client = token::StellarAssetClient::new(&env, &token);
+
+    client.initialize(
+        &admin,
+        &token,
+        &String::from_str(&env, "Test Group"),
+        &1000i128,
+        &GroupType::Rotational,
+        &None,
+        &false,
+        &None,
+    );
+
+    let member0 = Address::generate(&env);
+    let member1 = Address::generate(&env);
+    let member2 = Address::generate(&env);
+    client.add_member(&member0);
+    client.add_member(&member1);
+    client.add_member(&member2);
+
+    token_client.mint(&member0, &10000);
+    // Only member0 contributes — contract balance is 1000, but the full pool
+    // (1000 * 3 = 3000) is still within bounds for an explicit request, so
+    // this must fail on the balance check, not the pool-size ceiling check.
+    client.contribute(&member0, &1000);
+
+    client.payout(&member0, &Some(1500i128));
 }
 
 // ---------------------------------------------------------------------------
@@ -1081,7 +1248,7 @@ impl MaliciousToken {
             let kolo: Address = env.storage().instance().get(&MalKey::Kolo).unwrap();
             let client = KoloSavingsContractClient::new(&env, &kolo);
             // Attempt reentrancy from inside balance(), before transfer() is ever reached.
-            client.payout(&kolo); // recipient doesn't matter — should never get this far
+            client.payout(&kolo, &None); // recipient doesn't matter — should never get this far
         }
         i128::MAX
     }
@@ -1096,7 +1263,7 @@ impl MaliciousToken {
             // Attack: try to trigger a second payout to the same recipient
             // while the outer payout() call is still mid-flight.
             let client = KoloSavingsContractClient::new(&env, &kolo);
-            client.payout(&to);
+            client.payout(&to, &None);
         } else {
             // Observe: read back whether payout()'s effects were already
             // applied by the time this callback runs.
@@ -1162,7 +1329,7 @@ fn test_cei_effects_committed_before_external_transfer() {
     kolo_client.contribute(&member, &1000);
     assert!(!mal_client.get_observed()); // contribute's own transfer targets the contract, not a member
 
-    kolo_client.payout(&member);
+    kolo_client.payout(&member, &None);
 
     // The MaliciousToken observed, from *inside* the transfer() callback, that
     // has_received_payout(member) was already true — proving effects were
@@ -1195,7 +1362,7 @@ fn test_reentrant_payout_call_is_blocked() {
 
     // This should panic with "Reentrancy detected" because the guard set at
     // the top of payout() is still held when the reentrant call happens.
-    kolo_client.payout(&member);
+    kolo_client.payout(&member, &None);
 }
 
 /// Requirement: contribute() must also refuse to run if a payout is (somehow)
@@ -1285,7 +1452,7 @@ fn test_reentrant_payout_call_via_balance_is_blocked() {
     kolo_client.contribute(&member, &1000);
 
     mal_client.set_mode(&2u32); // reenter via balance(), not transfer()
-    kolo_client.payout(&member);
+    kolo_client.payout(&member, &None);
 }
 
 #[test]
@@ -1414,7 +1581,7 @@ fn test_emergency_withdraw_full_flow() {
     client.contribute(&member1, &1000); // contract: 2000 again
 
     assert_eq!(client.get_next_payout_recipient(), member1);
-    client.payout(&member1);
+    client.payout(&member1, &None);
 
     // pool_size = contribution_amount(1000) * frozen CycleMemberCount(1) = 1000
     // member1: 4000 (after re-contribute) + 1000 (payout) = 5000
